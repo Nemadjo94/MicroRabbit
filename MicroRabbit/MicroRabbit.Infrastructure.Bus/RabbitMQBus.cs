@@ -135,19 +135,30 @@ namespace MicroRabbit.Infrastructure.Bus
 
             }
         }
-        //
+        //Process our events
         private async Task ProcessEvent(string eventName, string message)
         {
+            //Look through dictionary of handlers
             if (_handlers.ContainsKey(eventName))
             {
+                //Subs are event name from our dictionary
                 var subscriptions = _handlers[eventName];
                 foreach(var subscription in subscriptions)
                 {
+                    //Dynamic aproach to generics
+                    //Create instance of type class
                     var handler = Activator.CreateInstance(subscription);
+                    //If there is no handler just loop through
                     if (handler == null) continue;
+                    //Get the first where the event type is equal to the event name
                     var eventType = _eventTypes.SingleOrDefault(t => t.Name == eventName);
+                    //Deserialize json object into event
                     var @event = JsonConvert.DeserializeObject(message, eventType);
+                    //Our concrete type is type of generic type
+                    //All events implement IEvent handler
                     var concreteType = typeof(IEventHandler<>).MakeGenericType(eventType);
+                    //Invoke method handle and give it a new object 
+                    //Routes to the right handler
                     await (Task)concreteType.GetMethod("Handle").Invoke(handler, new object[] { @event });
                 }
             }
