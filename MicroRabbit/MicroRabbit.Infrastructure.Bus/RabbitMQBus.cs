@@ -7,6 +7,7 @@ using MediatR;
 using MicroRabbit.Domain.Core.Bus;
 using MicroRabbit.Domain.Core.Commands;
 using MicroRabbit.Domain.Core.Events;
+using Microsoft.Extensions.DependencyInjection;
 using Newtonsoft.Json;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
@@ -23,10 +24,13 @@ namespace MicroRabbit.Infrastructure.Bus
         //We are using generics so we can have all type of events
         private readonly List<Type> _eventTypes;
 
+        private readonly IServiceScopeFactory _serviceScopeFactory;
+
         //Set up our constructor so we can use dependency injection
-        public RabbitMQBus(IMediator mediator)
+        public RabbitMQBus(IMediator mediator, IServiceScopeFactory serviceScopeFactory)
         {
             _mediator = mediator;
+            _serviceScopeFactory = serviceScopeFactory;
             _handlers = new Dictionary<string, List<Type>>();
             _eventTypes = new List<Type>();//handles all types of event handlers
         }
@@ -141,26 +145,31 @@ namespace MicroRabbit.Infrastructure.Bus
             //Look through dictionary of handlers
             if (_handlers.ContainsKey(eventName))
             {
-                //Subs are event name from our dictionary
-                var subscriptions = _handlers[eventName];
-                foreach(var subscription in subscriptions)
+                using (var scope = _serviceScopeFactory.CreateScope())
                 {
-                    //Dynamic aproach to generics
-                    //Create instance of type class
-                    var handler = Activator.CreateInstance(subscription);
-                    //If there is no handler just loop through
-                    if (handler == null) continue;
-                    //Get the first where the event type is equal to the event name
-                    var eventType = _eventTypes.SingleOrDefault(t => t.Name == eventName);
-                    //Deserialize json object into event
-                    var @event = JsonConvert.DeserializeObject(message, eventType);
-                    //Our concrete type is type of generic type
-                    //All events implement IEvent handler
-                    var concreteType = typeof(IEventHandler<>).MakeGenericType(eventType);
-                    //Invoke method handle and give it a new object 
-                    //Routes to the right handler
-                    await (Task)concreteType.GetMethod("Handle").Invoke(handler, new object[] { @event });
+                    //Subs are event name from our dictionary
+                    var subscriptions = _handlers[eventName];
+                    foreach (var subscription in subscriptions)
+                    {
+                        //Dynamic aproach to generics
+                        //Create instance of type class
+                        var handler = scope.ServiceProvider.GetService(subscription);
+                        //If there is no handler just loop through
+                        if (handler == null) continue;
+                        //Get the first where the event type is equal to the event name
+                        var eventType = _eventTypes.SingleOrDefault(t => t.Name == eventName);
+                        //Deserialize json object into event
+                        var @event = JsonConvert.DeserializeObject(message, eventType);
+                        //Our concrete type is type of generic type
+                        //All events implement IEvent handler
+                        var concreteType = typeof(IEventHandler<>).MakeGenericType(eventType);
+                        //Invoke method handle and give it a new object 
+                        //Routes to the right handler
+                        await (Task)concreteType.GetMethod("Handle").Invoke(handler, new object[] { @event });
+                    }
                 }
+               
+                
             }
         }
     }
